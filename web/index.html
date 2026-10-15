@@ -1,0 +1,998 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Emoji Encoder — Hide messages in plain sight</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔮</text></svg>" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;1,300&display=swap" rel="stylesheet" />
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:         #06060f;
+      --bg2:        #0b0b18;
+      --bg3:        #10101e;
+      --bg4:        #151525;
+      --border:     #1c1c2e;
+      --border2:    #2a2a44;
+      --border3:    #3a3a5a;
+      --amber:      #f59e0b;
+      --amber-dim:  #b47308;
+      --amber-glow: #f59e0b28;
+      --amber-mid:  #f59e0b66;
+      --cyan:       #22d3ee;
+      --cyan-dim:   #0891b2;
+      --cyan-glow:  #22d3ee20;
+      --green:      #4ade80;
+      --green-glow: #4ade8020;
+      --red:        #f87171;
+      --red-glow:   #f8717120;
+      --teal:       #2dd4bf;
+      --teal-glow:  #2dd4bf20;
+      --text:       #b8b8d0;
+      --text-dim:   #4a4a6a;
+      --text-mid:   #7070a0;
+      --text-hi:    #eeeef8;
+      --radius:     10px;
+      --radius-lg:  16px;
+    }
+
+    html { scroll-behavior: smooth; }
+    body {
+      background: var(--bg); color: var(--text); font-family: 'Syne', sans-serif;
+      min-height: 100vh; overflow-x: hidden; position: relative;
+    }
+
+    /* noise grain */
+    body::before {
+      content: ''; position: fixed; inset: 0;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E");
+      opacity: 0.03; pointer-events: none; z-index: 0;
+    }
+
+    /* scan lines */
+    body::after {
+      content: ''; position: fixed; inset: 0;
+      background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.06) 2px, rgba(0,0,0,0.06) 4px);
+      pointer-events: none; z-index: 0; opacity: 0.4;
+    }
+
+    .blob { position: fixed; border-radius: 50%; filter: blur(140px); pointer-events: none; z-index: 0; }
+    .blob-1 { width: 600px; height: 600px; background: radial-gradient(circle, #f59e0b14 0%, transparent 70%); top: -250px; left: -200px; animation: drift 20s ease-in-out infinite alternate; }
+    .blob-2 { width: 500px; height: 500px; background: radial-gradient(circle, #8b5cf614 0%, transparent 70%); bottom: -200px; right: -150px; animation: drift 26s ease-in-out infinite alternate-reverse; }
+    .blob-3 { width: 300px; height: 300px; background: radial-gradient(circle, #22d3ee0a 0%, transparent 70%); top: 50%; left: 50%; transform: translate(-50%, -50%); animation: drift 32s ease-in-out infinite alternate; }
+    @keyframes drift { from { transform: translate(0,0) scale(1); } to { transform: translate(50px,40px) scale(1.1); } }
+
+    .page { position: relative; z-index: 1; min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 48px 16px 80px; }
+
+    /* ── Header ── */
+    header { text-align: center; margin-bottom: 44px; animation: fadeUp 0.7s ease both; }
+    .logo-row { display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 10px; }
+    .logo-icon { font-size: 2.2rem; filter: drop-shadow(0 0 20px #f59e0b88); animation: pulse-icon 3s ease-in-out infinite; }
+    @keyframes pulse-icon { 0%,100% { filter: drop-shadow(0 0 14px #f59e0b66); } 50% { filter: drop-shadow(0 0 28px #f59e0bcc); } }
+    h1 { font-size: clamp(1.6rem, 4vw, 2.5rem); font-weight: 800; color: var(--text-hi); letter-spacing: -0.03em; line-height: 1.1; }
+    h1 span { color: var(--amber); }
+    .subtitle { margin-top: 10px; font-size: 0.8rem; color: var(--text-dim); letter-spacing: 0.14em; text-transform: uppercase; }
+    .subtitle span { color: var(--cyan); opacity: 0.7; }
+
+    @keyframes fadeUp { from { opacity: 0; transform: translateY(22px); } to { opacity: 1; transform: translateY(0); } }
+
+    /* ── Card ── */
+    .card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius-lg); width: 100%; max-width: 680px; overflow: hidden; box-shadow: 0 0 0 1px #ffffff03, 0 40px 100px #00000080; animation: fadeUp 0.7s 0.1s ease both; }
+
+    .tabs { display: grid; grid-template-columns: 1fr 1fr; border-bottom: 1px solid var(--border); }
+    .tab { background: none; border: none; cursor: pointer; padding: 16px; font-family: 'Syne', sans-serif; font-size: 0.82rem; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-dim); transition: color 0.2s, background 0.2s; position: relative; }
+    .tab::after { content: ''; position: absolute; bottom: -1px; left: 0; right: 0; height: 2px; background: var(--amber); transform: scaleX(0); transition: transform 0.25s ease; }
+    .tab.active { color: var(--amber); }
+    .tab.active::after { transform: scaleX(1); }
+    .tab:hover:not(.active) { color: var(--text); background: #ffffff04; }
+
+    .card-body { padding: 28px; }
+
+    /* ── Labels & Inputs ── */
+    .section-label { font-size: 0.68rem; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-dim); margin-bottom: 9px; display: flex; align-items: center; gap: 6px; }
+    .section-label .badge { font-size: 0.6rem; background: var(--amber-glow); color: var(--amber); border: 1px solid var(--amber-dim); border-radius: 4px; padding: 1px 6px; letter-spacing: 0.08em; }
+
+    textarea, input[type="text"], input[type="password"] {
+      width: 100%; background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius);
+      color: var(--text-hi); font-family: 'Syne', sans-serif; outline: none;
+      transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
+    }
+    textarea { font-size: 0.9rem; line-height: 1.6; padding: 14px 16px; resize: vertical; min-height: 88px; }
+    input { font-size: 0.92rem; padding: 10px 14px; }
+    textarea::placeholder, input::placeholder { color: var(--text-dim); }
+    textarea:focus, input:focus { border-color: var(--border3); box-shadow: 0 0 0 3px var(--amber-glow); background: var(--bg4); }
+
+    .output-area {
+      width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
+      color: #a8e6b0; font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; line-height: 1.75;
+      padding: 14px 16px; min-height: 88px; white-space: pre-wrap; word-break: break-all; position: relative;
+    }
+    .output-area.empty { color: var(--text-dim); }
+
+    .output-wrapper { position: relative; }
+    .copy-btn { position: absolute; top: 10px; right: 10px; background: var(--bg2); border: 1px solid var(--border2); border-radius: 6px; color: var(--text-dim); font-family: 'Syne', sans-serif; font-size: 0.68rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; padding: 5px 10px; cursor: pointer; transition: color 0.2s, border-color 0.2s, background 0.2s; opacity: 0; pointer-events: none; }
+    .output-wrapper:hover .copy-btn, .copy-btn.visible { opacity: 1; pointer-events: auto; }
+    .copy-btn:hover { color: var(--amber); border-color: var(--amber-dim); background: var(--amber-glow); }
+    .copy-btn.copied { color: var(--green); border-color: var(--green); }
+
+    .stat-bar { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; margin-top: 8px; min-height: 18px; }
+    .stat { font-family: 'JetBrains Mono', monospace; font-size: 0.7rem; color: var(--text-dim); }
+    .stat strong { color: var(--amber); }
+    .stat.green strong { color: var(--green); }
+    .stat.cyan strong { color: var(--cyan); }
+    .stat.violet strong { color: var(--violet); }
+
+    .divider { height: 1px; background: var(--border); margin: 22px 0; }
+
+    /* ── Carrier row ── */
+    .carrier-row { display: flex; gap: 10px; align-items: flex-start; margin-bottom: 14px; flex-wrap: wrap; }
+    .carrier-input-wrap { flex: 1; min-width: 160px; }
+
+    /* ── Key row ── */
+    .key-row { display: flex; gap: 8px; align-items: center; margin-bottom: 6px; }
+    .key-row input { flex: 1; }
+    .keygen-btn {
+      flex-shrink: 0; padding: 10px 14px; background: var(--bg3); border: 1px solid var(--border2);
+      border-radius: var(--radius); color: var(--cyan); font-family: 'Syne', sans-serif;
+      font-size: 0.72rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+      cursor: pointer; white-space: nowrap; transition: all 0.2s; display: flex; align-items: center; gap: 6px;
+    }
+    .keygen-btn:hover { background: var(--cyan-glow); border-color: var(--cyan-dim); }
+    .keygen-btn svg { width: 13px; height: 13px; }
+
+    /* ── AES Mode Row ── */
+    .mode-row { display: flex; gap: 6px; margin-bottom: 6px; flex-wrap: wrap; align-items: center; }
+    .mode-label { font-size: 0.68rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-dim); white-space: nowrap; }
+    .mode-pill {
+      padding: 5px 12px; border-radius: 20px; border: 1px solid var(--border2);
+      background: none; color: var(--text-mid); font-family: 'Syne', sans-serif;
+      font-size: 0.68rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+      cursor: pointer; transition: all 0.15s;
+    }
+    .mode-pill:hover:not(.active) { border-color: var(--border3); color: var(--text); }
+    .mode-pill.active { background: var(--amber-glow); border-color: var(--amber-dim); color: var(--amber); }
+    .mode-pill.active.teal-mode  { background: var(--teal-glow);  border-color: #2dd4bf66; color: var(--teal); }
+
+    /* ── Security Bar ── */
+    .security-wrap { margin-bottom: 16px; }
+    .security-bar-track { height: 5px; background: var(--border); border-radius: 99px; overflow: hidden; margin-top: 6px; margin-bottom: 5px; }
+    .security-bar-fill { height: 100%; border-radius: 99px; width: 0%; transition: width 0.4s cubic-bezier(.22,.68,0,1.2), background 0.4s ease; }
+    .security-labels { display: flex; justify-content: space-between; }
+    .security-label { font-family: 'JetBrains Mono', monospace; font-size: 0.65rem; color: var(--text-dim); }
+    .security-verdict { font-family: 'JetBrains Mono', monospace; font-size: 0.7rem; margin-top: 2px; transition: color 0.3s; }
+
+    /* ── Encode Mode Toggle (spread) ── */
+    .spread-row { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+    .toggle-label { font-size: 0.72rem; color: var(--text-mid); }
+    .toggle { position: relative; width: 36px; height: 20px; }
+    .toggle input { opacity: 0; width: 0; height: 0; }
+    .toggle-track { position: absolute; inset: 0; background: var(--border2); border-radius: 99px; cursor: pointer; transition: background 0.2s; }
+    .toggle-track::before { content: ''; position: absolute; height: 14px; width: 14px; left: 3px; top: 3px; background: var(--text-dim); border-radius: 50%; transition: transform 0.2s, background 0.2s; }
+    .toggle input:checked + .toggle-track { background: var(--amber-dim); }
+    .toggle input:checked + .toggle-track::before { transform: translateX(16px); background: var(--amber); }
+
+    /* ── Picker ── */
+    .picker-section { margin-top: 6px; }
+    #picker-search { margin-bottom: 10px; font-size: 0.82rem; padding: 8px 12px; }
+    .picker-tabs { display: flex; gap: 4px; margin-bottom: 10px; flex-wrap: wrap; }
+    .picker-tab { background: none; border: 1px solid var(--border); border-radius: 6px; color: var(--text-dim); font-family: 'Syne', sans-serif; font-size: 0.68rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; padding: 5px 10px; cursor: pointer; transition: all 0.15s; }
+    .picker-tab.active { color: var(--amber); border-color: var(--amber-dim); background: var(--amber-glow); }
+    .picker-tab:hover:not(.active) { border-color: var(--border2); color: var(--text); }
+    .picker-grid { display: flex; flex-wrap: wrap; gap: 5px; max-height: 150px; overflow-y: auto; padding-right: 4px; }
+    .picker-grid::-webkit-scrollbar { width: 5px; }
+    .picker-grid::-webkit-scrollbar-track { background: transparent; }
+    .picker-grid::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 4px; }
+    .picker-grid::-webkit-scrollbar-thumb:hover { background: var(--amber-dim); }
+    .picker-item { background: var(--bg3); border: 1px solid var(--border); border-radius: 7px; cursor: pointer; font-size: 0.88rem; width: 35px; height: 35px; display: flex; align-items: center; justify-content: center; transition: all 0.15s; color: var(--text); font-family: 'JetBrains Mono', monospace; flex-shrink: 0; }
+    .picker-item:hover { border-color: var(--amber-dim); background: var(--amber-glow); transform: scale(1.1); }
+    .picker-item.selected { border-color: var(--amber); background: var(--amber-glow); box-shadow: 0 0 10px var(--amber-glow); }
+
+    /* ── Decode Detection Badge ── */
+    .detection-badge { display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: 8px; font-family: 'JetBrains Mono', monospace; font-size: 0.7rem; font-weight: 500; border: 1px solid; margin-bottom: 12px; animation: fadeUp 0.3s ease both; }
+    .detection-badge.aes-gcm     { background: var(--amber-glow); border-color: var(--amber-dim); color: var(--amber); }
+    .detection-badge.aes-gcm-siv { background: var(--teal-glow);  border-color: #2dd4bf66;        color: var(--teal); }
+    .detection-badge.base64-aes  { background: var(--cyan-glow);  border-color: var(--cyan-dim);  color: var(--cyan); }
+    .detection-badge.plain { background: var(--green-glow); border-color: #4ade8060; color: var(--green); }
+    .detection-badge.none { background: #ffffff08; border-color: var(--border2); color: var(--text-dim); }
+
+    /* ── Error ── */
+    .error-msg { margin-top: 12px; padding: 10px 14px; background: #ef444412; border: 1px solid #ef444436; border-radius: var(--radius); color: var(--red); font-size: 0.78rem; font-family: 'JetBrains Mono', monospace; display: none; }
+
+    /* ── Info box ── */
+    .info-box { margin-top: 10px; padding: 10px 14px; background: var(--cyan-glow); border: 1px solid var(--cyan-dim); border-radius: var(--radius); font-size: 0.75rem; color: var(--cyan); font-family: 'JetBrains Mono', monospace; display: none; }
+
+    /* ── How It Works ── */
+    .how-it-works { margin-top: 32px; max-width: 680px; width: 100%; animation: fadeUp 0.7s 0.2s ease both; }
+    .how-title { font-size: 0.68rem; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-dim); margin-bottom: 12px; text-align: center; }
+    .how-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; }
+    .how-card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; transition: border-color 0.2s; }
+    .how-card:hover { border-color: var(--border2); }
+    .how-card-icon { font-size: 1.2rem; margin-bottom: 7px; }
+    .how-card-title { font-size: 0.78rem; font-weight: 700; color: var(--text-hi); margin-bottom: 4px; }
+    .how-card-desc { font-size: 0.72rem; color: var(--text-dim); line-height: 1.55; }
+
+    footer { margin-top: 36px; text-align: center; animation: fadeUp 0.7s 0.3s ease both; }
+    footer a { font-size: 0.72rem; color: var(--text-dim); text-decoration: none; letter-spacing: 0.06em; transition: color 0.2s; }
+    footer a:hover { color: var(--amber); }
+
+    /* Tooltip */
+    [data-tip] { position: relative; }
+    [data-tip]::after { content: attr(data-tip); position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%); white-space: nowrap; background: var(--bg4); border: 1px solid var(--border2); border-radius: 6px; padding: 4px 10px; font-size: 0.68rem; font-family: 'JetBrains Mono', monospace; color: var(--text); opacity: 0; pointer-events: none; transition: opacity 0.15s; z-index: 10; }
+    [data-tip]:hover::after { opacity: 1; }
+
+    @media (max-width: 480px) {
+      .card-body { padding: 18px; }
+      .carrier-row, .key-row { flex-direction: column; }
+      .mode-row { gap: 4px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="blob blob-1"></div>
+  <div class="blob blob-2"></div>
+  <div class="blob blob-3"></div>
+
+  <div class="page">
+    <header>
+      <div class="logo-row"><span class="logo-icon">🔮</span><h1>Hide a message in <span>plain sight</span></h1></div>
+      <p class="subtitle">Unicode steganography &nbsp;·&nbsp; <span>AES Encryption</span> &nbsp;·&nbsp; Variation Selectors</p>
+    </header>
+
+    <div class="card">
+      <div class="tabs">
+        <button class="tab active" id="tab-encode" onclick="switchMode('encode')">⬡ Encode</button>
+        <button class="tab" id="tab-decode" onclick="switchMode('decode')">⬡ Decode</button>
+      </div>
+
+      <!-- ══════════════ ENCODE PANEL ══════════════ -->
+      <div class="card-body" id="panel-encode">
+
+        <div class="section-label">Secret Message</div>
+        <textarea id="enc-message" placeholder="Type the message you want to hide…" rows="3" oninput="onEncodeInput()"></textarea>
+
+        <div class="divider"></div>
+
+        <!-- Carrier -->
+        <div class="section-label">Carrier Character</div>
+        <div class="carrier-row">
+          <div class="carrier-input-wrap">
+            <input id="enc-carrier" type="text" placeholder="😀  or any text" value="😀" oninput="onEncodeInput()" />
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
+            <span class="toggle-label">Spread</span>
+            <label class="toggle" data-tip="Distribute bytes across all carrier chars">
+              <input type="checkbox" id="enc-spread" onchange="onEncodeInput()">
+              <span class="toggle-track"></span>
+            </label>
+          </div>
+        </div>
+
+        <div class="picker-section">
+          <input type="text" id="picker-search" placeholder="Search characters…" oninput="renderPicker()">
+          <div class="picker-tabs">
+            <button class="picker-tab active" onclick="showPicker('all', this)">All</button>
+            <button class="picker-tab" onclick="showPicker('emoji', this)">Emoji</button>
+            <button class="picker-tab" onclick="showPicker('lower', this)">a–z</button>
+            <button class="picker-tab" onclick="showPicker('upper', this)">A–Z</button>
+            <button class="picker-tab" onclick="showPicker('digit', this)">0–9</button>
+          </div>
+          <div class="picker-grid" id="picker-grid"></div>
+        </div>
+
+        <div class="divider"></div>
+
+        <!-- Encryption section -->
+        <div class="section-label">
+          Encryption Key <span class="badge" id="enc-mode-badge">AES-GCM</span>
+        </div>
+
+        <!-- AES Mode -->
+        <div class="mode-row" style="margin-bottom:10px;">
+          <span class="mode-label">Mode:</span>
+          <button class="mode-pill active" id="mpill-gcm"     onclick="setAesMode('GCM', this)">AES-GCM</button>
+          <button class="mode-pill"        id="mpill-gcmsiv"  onclick="setAesMode('GCM_SIV', this)">AES-GCM-SIV</button>
+          <button class="mode-pill"        id="mpill-b64"     onclick="setAesMode('BASE64_GCM', this)">Base64 + AES</button>
+        </div>
+
+        <!-- Key input + keygen -->
+        <div class="key-row">
+          <input id="enc-key" type="password" placeholder="Encryption key (optional — leave empty for none)" oninput="onKeyInput(); onEncodeInput()" />
+          <button class="keygen-btn" onclick="generateKey()" data-tip="Generate secure random key">
+            <svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M11 1a4 4 0 1 1 0 8 4 4 0 0 1 0-8zm0 1.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5zM9.5 7.5l-7 7M2.5 12l2 2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+            </svg>
+            Gen Key
+          </button>
+          <button class="keygen-btn" onclick="toggleKeyViz('enc-key')" style="padding:10px;" data-tip="Show/hide key">
+            <svg id="eye-enc" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style="width:15px;height:15px;">
+              <path d="M1 8C1 8 3.5 3 8 3s7 5 7 5-2.5 5-7 5S1 8 1 8z" stroke="currentColor" stroke-width="1.3"/>
+              <circle cx="8" cy="8" r="2" stroke="currentColor" stroke-width="1.3"/>
+            </svg>
+          </button>
+        </div>
+
+        <!-- Security bar -->
+        <div class="security-wrap">
+          <div class="security-bar-track">
+            <div class="security-bar-fill" id="sec-bar"></div>
+          </div>
+          <div class="security-labels">
+            <span class="security-label">Insecure</span>
+            <span class="security-label">Weak</span>
+            <span class="security-label">Fair</span>
+            <span class="security-label">Strong</span>
+            <span class="security-label">Fort Knox</span>
+          </div>
+          <div class="security-verdict" id="sec-verdict"></div>
+        </div>
+
+        <div id="mode-info" class="info-box"></div>
+
+        <div class="divider"></div>
+
+        <div class="section-label">Encoded Output</div>
+        <div class="output-wrapper">
+          <div class="output-area" id="enc-output" style="min-height:64px;">
+            <span style="color:var(--text-dim);font-family:'Syne',sans-serif;font-size:0.85rem;">Encoded text will appear here…</span>
+          </div>
+          <button class="copy-btn" id="enc-copy-btn" onclick="copyOutput('enc-output','enc-copy-btn')">Copy</button>
+        </div>
+        <div class="stat-bar" id="enc-stats"></div>
+        <div class="error-msg" id="enc-error"></div>
+      </div>
+
+      <!-- ══════════════ DECODE PANEL ══════════════ -->
+      <div class="card-body" id="panel-decode" style="display:none;">
+        <div class="section-label">Paste Encoded Text</div>
+        <textarea id="dec-input" placeholder="Paste text that may contain a hidden message…" rows="4" style="margin-bottom:14px;" oninput="onDecodeInput()"></textarea>
+
+        <div id="dec-detection-wrap" style="min-height:0;"></div>
+
+        <div class="section-label">Decryption Key <span id="dec-key-hint" class="badge" style="display:none;"></span></div>
+        <div class="key-row">
+          <input id="dec-key" type="password" placeholder="Enter key if encrypted…" oninput="onDecodeInput()" />
+          <button class="keygen-btn" onclick="toggleKeyViz('dec-key')" style="padding:10px;" data-tip="Show/hide key">
+            <svg id="eye-dec" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style="width:15px;height:15px;">
+              <path d="M1 8C1 8 3.5 3 8 3s7 5 7 5-2.5 5-7 5S1 8 1 8z" stroke="currentColor" stroke-width="1.3"/>
+              <circle cx="8" cy="8" r="2" stroke="currentColor" stroke-width="1.3"/>
+            </svg>
+          </button>
+        </div>
+
+        <!-- Force mode override -->
+        <div class="mode-row" style="margin-top:8px;margin-bottom:4px;">
+          <span class="mode-label">Force:</span>
+          <button class="mode-pill active" id="dpill-auto"   onclick="setDecMode('auto', this)">Auto</button>
+          <button class="mode-pill"        id="dpill-gcm"    onclick="setDecMode('GCM', this)">AES-GCM</button>
+          <button class="mode-pill"        id="dpill-gcmsiv" onclick="setDecMode('GCM_SIV', this)">AES-GCM-SIV</button>
+          <button class="mode-pill"        id="dpill-b64"    onclick="setDecMode('BASE64_GCM', this)">Base64+AES</button>
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="section-label">Decoded Message</div>
+        <div class="output-wrapper">
+          <div class="output-area" id="dec-output" style="min-height:64px;">
+            <span style="color:var(--text-dim);font-family:'Syne',sans-serif;font-size:0.85rem;">Decoded message will appear here…</span>
+          </div>
+          <button class="copy-btn" id="dec-copy-btn" onclick="copyOutput('dec-output','dec-copy-btn')">Copy</button>
+        </div>
+        <div class="stat-bar" id="dec-stats"></div>
+        <div class="error-msg" id="dec-error"></div>
+      </div>
+    </div>
+
+    <!-- How it works -->
+    <div class="how-it-works">
+      <div class="how-title">How it works</div>
+      <div class="how-grid">
+        <div class="how-card">
+          <div class="how-card-icon">👁️</div>
+          <div class="how-card-title">Invisible Ink</div>
+          <div class="how-card-desc">Unicode Variation Selectors (U+FE00–U+E01EF) are zero-width characters that carry byte values 0–255 invisibly.</div>
+        </div>
+        <div class="how-card">
+          <div class="how-card-icon">🔐</div>
+          <div class="how-card-title">AES Encryption</div>
+          <div class="how-card-desc">Three cipher modes: GCM (authenticated), CBC (classic), CTR (stream). All use AES-256 with SHA-256 key derivation.</div>
+        </div>
+        <div class="how-card">
+          <div class="how-card-icon">⚡</div>
+          <div class="how-card-title">Base64 + AES</div>
+          <div class="how-card-desc">Double obfuscation: message is Base64-encoded first, then AES encrypted. Decoder auto-detects and strips both layers.</div>
+        </div>
+        <div class="how-card">
+          <div class="how-card-icon">🎲</div>
+          <div class="how-card-title">Key Generator</div>
+          <div class="how-card-desc">Generate cryptographically secure random keys. A strong key makes brute-force attacks computationally impossible.</div>
+        </div>
+      </div>
+    </div>
+
+    <footer>
+      <a href="https://github.com/paulgb/emoji-encoder" target="_blank" rel="noopener noreferrer">
+        Original concept by paulgb · Python port &amp; web UI by Nivalos
+      </a>
+    </footer>
+  </div>
+
+  <script>
+  // ══════════════════════════════════════════════════════════════
+  //  VARIATION SELECTOR CORE
+  // ══════════════════════════════════════════════════════════════
+  const VS_START      = 0xFE00;
+  const VS_END        = 0xFE0F;
+  const VS_SUPP_START = 0xE0100;
+  const VS_SUPP_END   = 0xE01EF;
+
+  function toVariationSelector(byte) {
+    if (byte >= 0 && byte <= 15)   return String.fromCodePoint(VS_START + byte);
+    if (byte >= 16 && byte <= 255) return String.fromCodePoint(VS_SUPP_START + byte - 16);
+    throw new Error(`Byte value must be 0–255, got ${byte}`);
+  }
+  function fromVariationSelector(cp) {
+    if (cp >= VS_START      && cp <= VS_END)      return cp - VS_START;
+    if (cp >= VS_SUPP_START && cp <= VS_SUPP_END) return cp - VS_SUPP_START + 16;
+    return null;
+  }
+  function stripVS(text) {
+    return [...text].filter(c => fromVariationSelector(c.codePointAt(0)) === null).join('');
+  }
+  function countHiddenBytes(text) {
+    return [...text].filter(c => fromVariationSelector(c.codePointAt(0)) !== null).length;
+  }
+  function visibleLength(text) {
+    return [...text].filter(c => fromVariationSelector(c.codePointAt(0)) === null).length;
+  }
+  function hasHiddenData(text) {
+    return [...text].some(c => fromVariationSelector(c.codePointAt(0)) !== null);
+  }
+  function extractBytes(text) {
+    const out = [];
+    for (const ch of text) {
+      const b = fromVariationSelector(ch.codePointAt(0));
+      if (b !== null) out.push(b);
+    }
+    return new Uint8Array(out);
+  }
+
+  // ══════════════════════════════════════════════════════════════
+  //  MODE MAGIC BYTES  (prepended to ciphertext so decoder knows)
+  // ══════════════════════════════════════════════════════════════
+  // 1 byte prefix:
+  //   0x00 = plain text (no encryption)
+  //   0x01 = AES-GCM
+  //   0x02 = AES-CBC
+  //   0x03 = AES-CTR
+  //   0x04 = Base64 + AES-GCM
+  const MAGIC = { PLAIN: 0x00, GCM: 0x01, CBC: 0x02, CTR: 0x03, BASE64_GCM: 0x04 };
+  const MAGIC_INV = Object.fromEntries(Object.entries(MAGIC).map(([k,v]) => [v,k]));
+
+  // ══════════════════════════════════════════════════════════════
+  //  AES KEY DERIVATION
+  // ══════════════════════════════════════════════════════════════
+  async function deriveKey(keyStr, algo) {
+    const raw = new TextEncoder().encode(keyStr);
+    const hash = await crypto.subtle.digest('SHA-256', raw);
+    return crypto.subtle.importKey('raw', hash, { name: algo }, false, ['encrypt','decrypt']);
+  }
+
+  // ══════════════════════════════════════════════════════════════
+  //  AES ENCRYPT
+  // ══════════════════════════════════════════════════════════════
+  async function aesEncrypt(dataBytes, keyStr, mode) {
+    if (mode === 'GCM') {
+      const key = await deriveKey(keyStr, 'AES-GCM');
+      const iv = crypto.getRandomValues(new Uint8Array(12));
+      const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, dataBytes));
+      const out = new Uint8Array(1 + iv.length + ct.length);
+      out[0] = MAGIC.GCM;
+      out.set(iv, 1);
+      out.set(ct, 1 + iv.length);
+      return out;
+    }
+    if (mode === 'CBC') {
+      const key = await deriveKey(keyStr, 'AES-CBC');
+      const iv = crypto.getRandomValues(new Uint8Array(16));
+      // PKCS7 pad
+      const padLen = 16 - (dataBytes.length % 16);
+      const padded = new Uint8Array(dataBytes.length + padLen);
+      padded.set(dataBytes);
+      padded.fill(padLen, dataBytes.length);
+      const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-CBC', iv }, key, padded));
+      const out = new Uint8Array(1 + iv.length + ct.length);
+      out[0] = MAGIC.CBC;
+      out.set(iv, 1);
+      out.set(ct, 1 + iv.length);
+      return out;
+    }
+    if (mode === 'CTR') {
+      const key = await deriveKey(keyStr, 'AES-CTR');
+      const counter = crypto.getRandomValues(new Uint8Array(16));
+      const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-CTR', counter, length: 64 }, key, dataBytes));
+      const out = new Uint8Array(1 + counter.length + ct.length);
+      out[0] = MAGIC.CTR;
+      out.set(counter, 1);
+      out.set(ct, 1 + counter.length);
+      return out;
+    }
+    if (mode === 'BASE64_GCM') {
+      // Base64-encode first, then AES-GCM
+      const b64str = btoa(String.fromCharCode(...dataBytes));
+      const b64bytes = new TextEncoder().encode(b64str);
+      const key = await deriveKey(keyStr, 'AES-GCM');
+      const iv = crypto.getRandomValues(new Uint8Array(12));
+      const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, b64bytes));
+      const out = new Uint8Array(1 + iv.length + ct.length);
+      out[0] = MAGIC.BASE64_GCM;
+      out.set(iv, 1);
+      out.set(ct, 1 + iv.length);
+      return out;
+    }
+    throw new Error('Unknown mode: ' + mode);
+  }
+
+  // ══════════════════════════════════════════════════════════════
+  //  AES DECRYPT
+  // ══════════════════════════════════════════════════════════════
+  async function aesDecrypt(allBytes, keyStr, forcedMode) {
+    if (allBytes.length < 2) throw new Error('Data too short to decrypt.');
+
+    let modeByte = allBytes[0];
+    let modeName = MAGIC_INV[modeByte];
+
+    if (forcedMode && forcedMode !== 'auto') {
+      modeName = forcedMode;
+      modeByte = MAGIC[forcedMode];
+      // treat all bytes as payload (no magic prefix for forced mode)
+    }
+
+    if (!modeName) throw new Error(`Unknown encryption magic byte: 0x${modeByte.toString(16)}`);
+
+    const payload = forcedMode && forcedMode !== 'auto' ? allBytes : allBytes.slice(1);
+
+    if (modeName === 'PLAIN') return new TextDecoder().decode(payload);
+
+    if (modeName === 'GCM') {
+      if (payload.length < 12) throw new Error('Data too short for AES-GCM.');
+      const key = await deriveKey(keyStr, 'AES-GCM');
+      const iv = payload.slice(0, 12);
+      const ct = payload.slice(12);
+      const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ct);
+      return new TextDecoder('utf-8', { fatal: true }).decode(pt);
+    }
+    if (modeName === 'CBC') {
+      if (payload.length < 16) throw new Error('Data too short for AES-CBC.');
+      const key = await deriveKey(keyStr, 'AES-CBC');
+      const iv = payload.slice(0, 16);
+      const ct = payload.slice(16);
+      const pt = new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-CBC', iv }, key, ct));
+      // Remove PKCS7 padding
+      const padLen = pt[pt.length - 1];
+      return new TextDecoder('utf-8', { fatal: true }).decode(pt.slice(0, pt.length - padLen));
+    }
+    if (modeName === 'CTR') {
+      if (payload.length < 16) throw new Error('Data too short for AES-CTR.');
+      const key = await deriveKey(keyStr, 'AES-CTR');
+      const counter = payload.slice(0, 16);
+      const ct = payload.slice(16);
+      const pt = await crypto.subtle.decrypt({ name: 'AES-CTR', counter, length: 64 }, key, ct);
+      return new TextDecoder('utf-8', { fatal: true }).decode(pt);
+    }
+    if (modeName === 'BASE64_GCM') {
+      if (payload.length < 12) throw new Error('Data too short for Base64+AES.');
+      const key = await deriveKey(keyStr, 'AES-GCM');
+      const iv = payload.slice(0, 12);
+      const ct = payload.slice(12);
+      const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ct);
+      const b64str = new TextDecoder().decode(pt);
+      const decoded = atob(b64str);
+      return decoded;
+    }
+    throw new Error('Unhandled mode: ' + modeName);
+  }
+
+  // ══════════════════════════════════════════════════════════════
+  //  STEGANOGRAPHY ENCODE / DECODE
+  // ══════════════════════════════════════════════════════════════
+  async function encode(carrier, text, keyStr, mode, spread) {
+    const clean = stripVS(carrier);
+    if (!clean) throw new Error('Carrier has no visible characters.');
+
+    let bytes = new TextEncoder().encode(text);
+
+    if (keyStr) {
+      bytes = await aesEncrypt(bytes, keyStr, mode);
+    } else {
+      // prepend PLAIN magic
+      const full = new Uint8Array(1 + bytes.length);
+      full[0] = MAGIC.PLAIN;
+      full.set(bytes, 1);
+      bytes = full;
+    }
+
+    if (spread && clean.length > 1) {
+      // distribute bytes across visible chars
+      const chars = [...clean];
+      let result = '';
+      for (let i = 0; i < chars.length; i++) {
+        result += chars[i];
+        for (let j = i; j < bytes.length; j += chars.length) {
+          result += toVariationSelector(bytes[j]);
+        }
+      }
+      return result;
+    } else {
+      let result = clean;
+      for (const b of bytes) result += toVariationSelector(b);
+      return result;
+    }
+  }
+
+  async function decode(text, keyStr, forcedMode) {
+    const bytes = extractBytes(text);
+    if (bytes.length === 0) return { text: '', mode: null };
+
+    // auto-detect
+    const magic = bytes[0];
+    const modeName = MAGIC_INV[magic];
+    const detectedMode = forcedMode && forcedMode !== 'auto' ? forcedMode : modeName;
+
+    if (!keyStr) {
+      // no key — if magic says plain, just decode; otherwise warn
+      if (magic === MAGIC.PLAIN) {
+        return { text: new TextDecoder().decode(bytes.slice(1)), mode: 'PLAIN' };
+      }
+      // try to decode raw (legacy / unknown)
+      try {
+        return { text: new TextDecoder('utf-8', { fatal: true }).decode(bytes), mode: 'PLAIN' };
+      } catch {
+        return { text: new TextDecoder().decode(bytes), mode: 'PLAIN' };
+      }
+    }
+
+    try {
+      const result = await aesDecrypt(bytes, keyStr, forcedMode && forcedMode !== 'auto' ? forcedMode : null);
+      return { text: result, mode: detectedMode };
+    } catch (e) {
+      throw new Error('Decryption failed. Incorrect key or corrupted data. (' + e.message + ')');
+    }
+  }
+
+  // ══════════════════════════════════════════════════════════════
+  //  KEY GENERATOR
+  // ══════════════════════════════════════════════════════════════
+  function generateKey() {
+    const bytes = new Uint8Array(24);
+    crypto.getRandomValues(bytes);
+    // base62-ish encoding
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#$%^&*';
+    let key = '';
+    for (const b of bytes) key += chars[b % chars.length];
+    const input = document.getElementById('enc-key');
+    input.value = key;
+    input.type = 'text';
+    onKeyInput();
+    onEncodeInput();
+    // flash
+    input.style.borderColor = 'var(--cyan)';
+    input.style.boxShadow = '0 0 0 3px var(--cyan-glow)';
+    setTimeout(() => { input.style.borderColor = ''; input.style.boxShadow = ''; }, 800);
+  }
+
+  function toggleKeyViz(inputId) {
+    const el = document.getElementById(inputId);
+    el.type = el.type === 'password' ? 'text' : 'password';
+  }
+
+  // ══════════════════════════════════════════════════════════════
+  //  SECURITY BAR
+  // ══════════════════════════════════════════════════════════════
+  function scorePassword(pw) {
+    if (!pw) return { score: 0, label: '', color: '' };
+    let s = 0;
+    if (pw.length >= 8)  s += 15;
+    if (pw.length >= 12) s += 15;
+    if (pw.length >= 16) s += 10;
+    if (pw.length >= 24) s += 10;
+    if (/[a-z]/.test(pw)) s += 5;
+    if (/[A-Z]/.test(pw)) s += 10;
+    if (/[0-9]/.test(pw)) s += 10;
+    if (/[^a-zA-Z0-9]/.test(pw)) s += 15;
+    // uniqueness
+    const unique = new Set(pw).size;
+    s += Math.min(10, Math.floor(unique / 3));
+    // common patterns penalize
+    if (/^(password|123|abc|qwerty|letmein|admin|welcome)/i.test(pw)) s = Math.max(0, s - 40);
+    if (/^(.)\1+$/.test(pw)) s = 2; // all same char
+    s = Math.min(100, s);
+
+    let label, color;
+    if (s <= 10)      { label = '🔓 Trivial — don\'t use this'; color = '#f87171'; }
+    else if (s <= 25) { label = '⚠️ Very weak'; color = '#f87171'; }
+    else if (s <= 45) { label = '🟠 Weak'; color = '#fb923c'; }
+    else if (s <= 60) { label = '🟡 Fair'; color = '#fbbf24'; }
+    else if (s <= 80) { label = '🟢 Strong'; color = '#4ade80'; }
+    else              { label = '🔒 Excellent'; color = '#22d3ee'; }
+    return { score: s, label, color };
+  }
+
+  function onKeyInput() {
+    const pw = document.getElementById('enc-key').value;
+    const { score, label, color } = scorePassword(pw);
+    const bar     = document.getElementById('sec-bar');
+    const verdict = document.getElementById('sec-verdict');
+    if (!pw) {
+      bar.style.width = '0%';
+      verdict.textContent = '';
+      return;
+    }
+    bar.style.width   = score + '%';
+    bar.style.background = color;
+    verdict.textContent  = label;
+    verdict.style.color  = color;
+  }
+
+  // ══════════════════════════════════════════════════════════════
+  //  AES MODE STATE
+  // ══════════════════════════════════════════════════════════════
+  let currentAesMode = 'GCM';
+  let currentDecMode = 'auto';
+
+  const MODE_INFO = {
+    GCM:        { label: 'AES-GCM', desc: 'Authenticated encryption. Tamper-proof — decryption fails if data is modified. Recommended.', cls: '' },
+    CBC:        { label: 'AES-CBC', desc: 'Classic block cipher mode. Widely compatible. Requires PKCS7 padding.', cls: 'cyan-mode' },
+    CTR:        { label: 'AES-CTR', desc: 'Counter mode — turns AES into a stream cipher. Fast. No padding needed.', cls: 'violet-mode' },
+    BASE64_GCM: { label: 'Base64 + AES-GCM', desc: 'Message is Base64-encoded first, then AES-GCM encrypted. Extra obfuscation layer.', cls: 'cyan-mode' },
+  };
+
+  function setAesMode(mode, btn) {
+    currentAesMode = mode;
+    document.querySelectorAll('.mode-pill[id^="mpill-"]').forEach(p => { p.classList.remove('active','cyan-mode','violet-mode'); });
+    const info = MODE_INFO[mode];
+    btn.classList.add('active');
+    if (info.cls) btn.classList.add(info.cls);
+    document.getElementById('enc-mode-badge').textContent = info.label;
+    const infoBox = document.getElementById('mode-info');
+    infoBox.textContent = '🛡 ' + info.desc;
+    infoBox.style.display = 'block';
+    onEncodeInput();
+  }
+
+  function setDecMode(mode, btn) {
+    currentDecMode = mode;
+    document.querySelectorAll('.mode-pill[id^="dpill-"]').forEach(p => { p.classList.remove('active','cyan-mode','violet-mode'); });
+    btn.classList.add('active');
+    onDecodeInput();
+  }
+
+  // ══════════════════════════════════════════════════════════════
+  //  PICKER
+  // ══════════════════════════════════════════════════════════════
+  const PICKERS = {
+    emoji: [
+      '😀','😂','🥰','😎','🤔','😅','😏','🥹','😤','🤯',
+      '👍','👎','👏','🤝','🙌','🫶','🎉','🎂','🔥','💯',
+      '🚀','👀','💀','🎯','🏆','💎','🍕','🍔','🌮','🍜',
+      '🍣','🍩','🍺','☕','🌈','🌞','🌙','⭐','🌊','🍀',
+      '🌸','🐶','🐱','🦊','🐼','🦁','🐧','🦋','🐢','🔮',
+      '💡','🎸','📱','📦','🗡️','🕵️','🌀','🔑','💌','🛸',
+    ],
+    lower: [...'abcdefghijklmnopqrstuvwxyz'],
+    upper: [...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'],
+    digit: [...'0123456789'],
+  };
+  PICKERS.all = [...PICKERS.emoji, ...PICKERS.lower, ...PICKERS.upper, ...PICKERS.digit];
+
+  let currentPickerKey = 'all';
+  function showPicker(key, btn) {
+    currentPickerKey = key;
+    document.querySelectorAll('.picker-tab').forEach(t => t.classList.remove('active'));
+    btn.classList.add('active');
+    renderPicker();
+  }
+
+  function renderPicker() {
+    const grid    = document.getElementById('picker-grid');
+    const carrier = document.getElementById('enc-carrier').value;
+    const query   = document.getElementById('picker-search').value.toLowerCase();
+    grid.innerHTML = '';
+    let items = PICKERS[currentPickerKey];
+    if (query) items = items.filter(i => i.toLowerCase().includes(query));
+    items.forEach(item => {
+      const btn = document.createElement('button');
+      btn.className = 'picker-item' + (item === carrier ? ' selected' : '');
+      btn.textContent = item;
+      btn.title = `Use "${item}" as carrier`;
+      btn.onclick = () => { document.getElementById('enc-carrier').value = item; renderPicker(); onEncodeInput(); };
+      grid.appendChild(btn);
+    });
+  }
+
+  // ══════════════════════════════════════════════════════════════
+  //  UI HELPERS
+  // ══════════════════════════════════════════════════════════════
+  function switchMode(mode) {
+    document.getElementById('panel-encode').style.display = mode === 'encode' ? '' : 'none';
+    document.getElementById('panel-decode').style.display = mode === 'decode' ? '' : 'none';
+    document.getElementById('tab-encode').classList.toggle('active', mode === 'encode');
+    document.getElementById('tab-decode').classList.toggle('active', mode === 'decode');
+  }
+
+  function showError(id, msg) {
+    const el = document.getElementById(id);
+    el.textContent = msg;
+    el.style.display = msg ? 'block' : 'none';
+  }
+
+  function setOutput(id, text, isEmpty) {
+    const el = document.getElementById(id);
+    if (isEmpty) {
+      el.innerHTML = `<span style="color:var(--text-dim);font-family:'Syne',sans-serif;font-size:0.85rem;">${text}</span>`;
+    } else {
+      el.textContent = text;
+    }
+  }
+
+  function setStats(id, parts) {
+    const el = document.getElementById(id);
+    el.innerHTML = parts.map(([label, val, cls]) =>
+      `<span class="stat${cls?' '+cls:''}">${label}: <strong>${val}</strong></span>`
+    ).join('');
+  }
+
+  function showDetectionBadge(detectedMode) {
+    const wrap = document.getElementById('dec-detection-wrap');
+    if (!detectedMode) { wrap.innerHTML = ''; return; }
+
+    const BADGE_MAP = {
+      PLAIN:       { cls: 'plain',     icon: '✓', text: 'Plain text — no encryption detected' },
+      GCM:         { cls: 'aes-gcm',   icon: '🔐', text: 'AES-256-GCM detected' },
+      CBC:         { cls: 'aes-cbc',   icon: '🔐', text: 'AES-256-CBC detected' },
+      CTR:         { cls: 'aes-ctr',   icon: '🔐', text: 'AES-256-CTR detected' },
+      BASE64_GCM:  { cls: 'base64-aes',icon: '⚡', text: 'Base64 + AES-GCM detected' },
+    };
+    const b = BADGE_MAP[detectedMode] || { cls: 'none', icon: '?', text: 'Unknown format' };
+    wrap.innerHTML = `<div class="detection-badge ${b.cls}" style="margin-bottom:10px;">${b.icon} ${b.text}</div>`;
+
+    const hint = document.getElementById('dec-key-hint');
+    if (detectedMode !== 'PLAIN') {
+      hint.textContent = 'required';
+      hint.style.display = 'inline';
+      hint.style.background = 'var(--red-glow)';
+      hint.style.borderColor = 'var(--red)';
+      hint.style.color = 'var(--red)';
+    } else {
+      hint.style.display = 'none';
+    }
+  }
+
+  // ══════════════════════════════════════════════════════════════
+  //  ENCODE
+  // ══════════════════════════════════════════════════════════════
+  let encodeTimer = null;
+  async function onEncodeInput() {
+    clearTimeout(encodeTimer);
+    encodeTimer = setTimeout(_doEncode, 60);
+  }
+
+  async function _doEncode() {
+    const message = document.getElementById('enc-message').value;
+    const carrier = document.getElementById('enc-carrier').value;
+    const key     = document.getElementById('enc-key').value;
+    const spread  = document.getElementById('enc-spread').checked;
+    renderPicker();
+    showError('enc-error', '');
+
+    if (!carrier.trim()) {
+      setOutput('enc-output', 'Encoded text will appear here…', true);
+      setStats('enc-stats', []);
+      document.getElementById('enc-copy-btn').classList.remove('visible');
+      return;
+    }
+    try {
+      const result  = await encode(carrier, message, key, currentAesMode, spread);
+      setOutput('enc-output', result, false);
+      const hidden  = countHiddenBytes(result);
+      const visible = visibleLength(result);
+      const isEnc   = !!key;
+      setStats('enc-stats', [
+        ['visible', visible],
+        ['hidden bytes', hidden],
+        ['mode', isEnc ? MODE_INFO[currentAesMode].label : 'plain', isEnc ? 'cyan' : ''],
+        ['spread', spread ? 'on' : 'off'],
+      ]);
+      document.getElementById('enc-copy-btn').classList.add('visible');
+    } catch (e) {
+      setOutput('enc-output', 'Encoded text will appear here…', true);
+      showError('enc-error', '⚠ ' + e.message);
+      setStats('enc-stats', []);
+      document.getElementById('enc-copy-btn').classList.remove('visible');
+    }
+  }
+
+  // ══════════════════════════════════════════════════════════════
+  //  DECODE
+  // ══════════════════════════════════════════════════════════════
+  let decodeTimer = null;
+  async function onDecodeInput() {
+    clearTimeout(decodeTimer);
+    decodeTimer = setTimeout(_doDecode, 80);
+  }
+
+  async function _doDecode() {
+    const text = document.getElementById('dec-input').value;
+    const key  = document.getElementById('dec-key').value;
+    showError('dec-error', '');
+
+    if (!text.trim()) {
+      setOutput('dec-output', 'Decoded message will appear here…', true);
+      setStats('dec-stats', []);
+      showDetectionBadge(null);
+      document.getElementById('dec-copy-btn').classList.remove('visible');
+      return;
+    }
+
+    // Detect mode from bytes
+    const rawBytes = extractBytes(text);
+    if (rawBytes.length > 0) {
+      const magic = rawBytes[0];
+      const detectedName = MAGIC_INV[magic] || null;
+      showDetectionBadge(detectedName);
+    } else {
+      showDetectionBadge(null);
+    }
+
+    try {
+      const { text: result, mode } = await decode(text, key, currentDecMode);
+      const hidden = countHiddenBytes(text);
+
+      if (result) {
+        setOutput('dec-output', result, false);
+        setStats('dec-stats', [
+          ['hidden bytes', hidden],
+          ['message length', result.length],
+          ['mode', mode ? (mode === 'PLAIN' ? 'plain' : MODE_INFO[mode]?.label || mode) : '—', 'cyan'],
+        ]);
+        document.getElementById('dec-copy-btn').classList.add('visible');
+      } else {
+        setOutput('dec-output', 'No hidden data found in this text.', true);
+        setStats('dec-stats', []);
+        document.getElementById('dec-copy-btn').classList.remove('visible');
+      }
+    } catch (e) {
+      setOutput('dec-output', 'Decoded message will appear here…', true);
+      showError('dec-error', '⚠ ' + e.message);
+      setStats('dec-stats', []);
+      document.getElementById('dec-copy-btn').classList.remove('visible');
+    }
+  }
+
+  // ══════════════════════════════════════════════════════════════
+  //  COPY
+  // ══════════════════════════════════════════════════════════════
+  async function copyOutput(outputId, btnId) {
+    const el  = document.getElementById(outputId);
+    const btn = document.getElementById(btnId);
+    try {
+      await navigator.clipboard.writeText(el.textContent);
+      btn.textContent = 'Copied!';
+      btn.classList.add('copied');
+      setTimeout(() => { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 2000);
+    } catch {
+      btn.textContent = 'Failed';
+      setTimeout(() => { btn.textContent = 'Copy'; }, 2000);
+    }
+  }
+
+  // ── Init ───────────────────────────────────────────────────────
+  renderPicker();
+  onEncodeInput();
+  </script>
+</body>
+</html>
