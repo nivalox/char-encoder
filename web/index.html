@@ -1,0 +1,868 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Emoji Encoder — Hide messages in plain sight</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔮</text></svg>" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;1,300&display=swap" rel="stylesheet" />
+
+  <style>
+    /* ── Reset & base ─────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #080810;
+      --bg2:       #0e0e1a;
+      --bg3:       #13131f;
+      --border:    #1e1e30;
+      --border2:   #2a2a44;
+      --amber:     #f59e0b;
+      --amber-dim: #b47308;
+      --amber-glow:#f59e0b33;
+      --green:     #22c55e;
+      --red:       #ef4444;
+      --text:      #c8c8dc;
+      --text-dim:  #5a5a80;
+      --text-hi:   #eeeef8;
+      --radius:    10px;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Syne', sans-serif;
+      min-height: 100vh;
+      overflow-x: hidden;
+      position: relative;
+    }
+
+    /* ── Noise texture overlay ─────────────────────────────────── */
+    body::before {
+      content: '';
+      position: fixed; inset: 0;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E");
+      opacity: 0.025;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* ── Ambient glow blobs ────────────────────────────────────── */
+    .blob {
+      position: fixed;
+      border-radius: 50%;
+      filter: blur(120px);
+      pointer-events: none;
+      z-index: 0;
+    }
+    .blob-1 {
+      width: 500px; height: 500px;
+      background: radial-gradient(circle, #f59e0b18 0%, transparent 70%);
+      top: -200px; left: -150px;
+      animation: drift 18s ease-in-out infinite alternate;
+    }
+    .blob-2 {
+      width: 400px; height: 400px;
+      background: radial-gradient(circle, #8b5cf618 0%, transparent 70%);
+      bottom: -150px; right: -100px;
+      animation: drift 22s ease-in-out infinite alternate-reverse;
+    }
+    @keyframes drift {
+      from { transform: translate(0, 0) scale(1); }
+      to   { transform: translate(40px, 30px) scale(1.08); }
+    }
+
+    /* ── Layout ───────────────────────────────────────────────── */
+    .page {
+      position: relative;
+      z-index: 1;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 48px 16px 80px;
+    }
+
+    /* ── Header ───────────────────────────────────────────────── */
+    header {
+      text-align: center;
+      margin-bottom: 48px;
+      animation: fadeUp 0.7s ease both;
+    }
+
+    .logo-row {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    .logo-icon {
+      font-size: 2rem;
+      filter: drop-shadow(0 0 16px #f59e0b88);
+      animation: pulse-icon 3s ease-in-out infinite;
+    }
+    @keyframes pulse-icon {
+      0%, 100% { filter: drop-shadow(0 0 12px #f59e0b66); }
+      50%       { filter: drop-shadow(0 0 24px #f59e0bcc); }
+    }
+
+    h1 {
+      font-size: clamp(1.6rem, 4vw, 2.4rem);
+      font-weight: 800;
+      color: var(--text-hi);
+      letter-spacing: -0.03em;
+      line-height: 1.1;
+    }
+    h1 span { color: var(--amber); }
+
+    .subtitle {
+      margin-top: 10px;
+      font-size: 0.88rem;
+      color: var(--text-dim);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    /* ── Card ─────────────────────────────────────────────────── */
+    .card {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      width: 100%;
+      max-width: 660px;
+      overflow: hidden;
+      box-shadow: 0 0 0 1px #ffffff04, 0 32px 80px #00000066;
+      animation: fadeUp 0.7s 0.1s ease both;
+    }
+
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(20px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    /* ── Mode tabs ────────────────────────────────────────────── */
+    .tabs {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .tab {
+      background: none;
+      border: none;
+      cursor: pointer;
+      padding: 16px;
+      font-family: 'Syne', sans-serif;
+      font-size: 0.85rem;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      transition: color 0.2s, background 0.2s;
+      position: relative;
+    }
+    .tab::after {
+      content: '';
+      position: absolute;
+      bottom: -1px; left: 0; right: 0;
+      height: 2px;
+      background: var(--amber);
+      transform: scaleX(0);
+      transition: transform 0.25s ease;
+    }
+    .tab.active { color: var(--amber); }
+    .tab.active::after { transform: scaleX(1); }
+    .tab:hover:not(.active) { color: var(--text); background: #ffffff04; }
+
+    /* ── Card body ────────────────────────────────────────────── */
+    .card-body { padding: 28px; }
+
+    /* ── Section label ────────────────────────────────────────── */
+    .section-label {
+      font-size: 0.72rem;
+      font-weight: 600;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      margin-bottom: 10px;
+    }
+
+    /* ── Textarea ─────────────────────────────────────────────── */
+    textarea {
+      width: 100%;
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text-hi);
+      font-family: 'Syne', sans-serif;
+      font-size: 0.93rem;
+      line-height: 1.6;
+      padding: 14px 16px;
+      resize: vertical;
+      min-height: 90px;
+      outline: none;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    textarea::placeholder { color: var(--text-dim); }
+    textarea:focus {
+      border-color: var(--border2);
+      box-shadow: 0 0 0 3px var(--amber-glow);
+    }
+
+    /* ── Mono output area ─────────────────────────────────────── */
+    .output-area {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: #a8e6b0;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.82rem;
+      line-height: 1.7;
+      padding: 14px 16px;
+      min-height: 90px;
+      white-space: pre-wrap;
+      word-break: break-all;
+      position: relative;
+    }
+    .output-area.empty { color: var(--text-dim); }
+
+    /* ── Copy button inside output ────────────────────────────── */
+    .output-wrapper { position: relative; }
+    .copy-btn {
+      position: absolute;
+      top: 10px; right: 10px;
+      background: var(--bg2);
+      border: 1px solid var(--border2);
+      border-radius: 6px;
+      color: var(--text-dim);
+      font-family: 'Syne', sans-serif;
+      font-size: 0.7rem;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      padding: 5px 10px;
+      cursor: pointer;
+      transition: color 0.2s, border-color 0.2s, background 0.2s;
+      opacity: 0;
+      pointer-events: none;
+    }
+    .output-wrapper:hover .copy-btn,
+    .copy-btn.visible { opacity: 1; pointer-events: auto; }
+    .copy-btn:hover { color: var(--amber); border-color: var(--amber-dim); background: var(--amber-glow); }
+    .copy-btn.copied { color: var(--green); border-color: var(--green); }
+
+    /* ── Stat bar ─────────────────────────────────────────────── */
+    .stat-bar {
+      display: flex;
+      gap: 16px;
+      align-items: center;
+      margin-top: 8px;
+      min-height: 18px;
+    }
+    .stat {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.72rem;
+      color: var(--text-dim);
+    }
+    .stat strong { color: var(--amber); }
+
+    /* ── Divider ──────────────────────────────────────────────── */
+    .divider {
+      height: 1px;
+      background: var(--border);
+      margin: 24px 0;
+    }
+
+    /* ── Carrier section ──────────────────────────────────────── */
+    .carrier-row {
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+    .carrier-input-wrap { flex: 1; min-width: 180px; }
+    .carrier-input {
+      width: 100%;
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text-hi);
+      font-family: 'Syne', sans-serif;
+      font-size: 1.1rem;
+      padding: 10px 14px;
+      outline: none;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    .carrier-input:focus {
+      border-color: var(--border2);
+      box-shadow: 0 0 0 3px var(--amber-glow);
+    }
+    .carrier-input::placeholder { color: var(--text-dim); font-size: 0.85rem; }
+
+    /* ── Spread toggle ────────────────────────────────────────── */
+    .spread-toggle {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      user-select: none;
+      padding: 10px 14px;
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      transition: border-color 0.2s;
+      white-space: nowrap;
+    }
+    .spread-toggle:hover { border-color: var(--border2); }
+    .spread-toggle input { display: none; }
+    .toggle-track {
+      width: 34px; height: 18px;
+      background: var(--border2);
+      border-radius: 99px;
+      position: relative;
+      transition: background 0.2s;
+      flex-shrink: 0;
+    }
+    .spread-toggle input:checked ~ .toggle-track { background: var(--amber); }
+    .toggle-thumb {
+      position: absolute;
+      top: 3px; left: 3px;
+      width: 12px; height: 12px;
+      border-radius: 50%;
+      background: white;
+      transition: transform 0.2s;
+    }
+    .spread-toggle input:checked ~ .toggle-track .toggle-thumb { transform: translateX(16px); }
+    .toggle-label {
+      font-size: 0.78rem;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      color: var(--text);
+    }
+
+    /* ── Picker grid ──────────────────────────────────────────── */
+    .picker-section { margin-top: 8px; }
+    .picker-tabs {
+      display: flex;
+      gap: 4px;
+      margin-bottom: 10px;
+      flex-wrap: wrap;
+    }
+    .picker-tab {
+      background: none;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text-dim);
+      font-family: 'Syne', sans-serif;
+      font-size: 0.7rem;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      padding: 5px 10px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .picker-tab.active { color: var(--amber); border-color: var(--amber-dim); background: var(--amber-glow); }
+    .picker-tab:hover:not(.active) { border-color: var(--border2); color: var(--text); }
+
+    .picker-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+    }
+    .picker-item {
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      cursor: pointer;
+      font-size: 0.9rem;
+      width: 36px; height: 36px;
+      display: flex; align-items: center; justify-content: center;
+      transition: all 0.15s;
+      color: var(--text);
+      font-family: 'JetBrains Mono', monospace;
+      flex-shrink: 0;
+    }
+    .picker-item:hover { border-color: var(--amber-dim); background: var(--amber-glow); transform: scale(1.08); }
+    .picker-item.selected { border-color: var(--amber); background: var(--amber-glow); box-shadow: 0 0 12px var(--amber-glow); }
+
+    /* ── Encode button ────────────────────────────────────────── */
+    .encode-btn {
+      width: 100%;
+      margin-top: 20px;
+      padding: 14px;
+      background: var(--amber);
+      border: none;
+      border-radius: var(--radius);
+      color: #0a0a00;
+      font-family: 'Syne', sans-serif;
+      font-size: 0.9rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      cursor: pointer;
+      transition: background 0.2s, transform 0.1s, box-shadow 0.2s;
+      box-shadow: 0 0 24px #f59e0b44;
+    }
+    .encode-btn:hover { background: #fbbf24; box-shadow: 0 0 36px #f59e0b66; transform: translateY(-1px); }
+    .encode-btn:active { transform: translateY(0); }
+
+    /* ── Error ────────────────────────────────────────────────── */
+    .error-msg {
+      margin-top: 12px;
+      padding: 10px 14px;
+      background: #ef444418;
+      border: 1px solid #ef444440;
+      border-radius: var(--radius);
+      color: #f87171;
+      font-size: 0.82rem;
+      font-family: 'JetBrains Mono', monospace;
+      display: none;
+    }
+
+    /* ── How it works footer ──────────────────────────────────── */
+    .how-it-works {
+      margin-top: 32px;
+      max-width: 660px;
+      width: 100%;
+      animation: fadeUp 0.7s 0.2s ease both;
+    }
+    .how-title {
+      font-size: 0.72rem;
+      font-weight: 600;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      margin-bottom: 12px;
+      text-align: center;
+    }
+    .how-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+    }
+    .how-card {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px;
+    }
+    .how-card-icon { font-size: 1.3rem; margin-bottom: 8px; }
+    .how-card-title {
+      font-size: 0.8rem;
+      font-weight: 700;
+      color: var(--text-hi);
+      margin-bottom: 4px;
+    }
+    .how-card-desc {
+      font-size: 0.75rem;
+      color: var(--text-dim);
+      line-height: 1.5;
+    }
+
+    /* ── Footer link ──────────────────────────────────────────── */
+    footer {
+      margin-top: 40px;
+      text-align: center;
+      animation: fadeUp 0.7s 0.3s ease both;
+    }
+    footer a {
+      font-size: 0.75rem;
+      color: var(--text-dim);
+      text-decoration: none;
+      letter-spacing: 0.06em;
+      transition: color 0.2s;
+    }
+    footer a:hover { color: var(--amber); }
+
+    /* ── Spacing helpers ──────────────────────────────────────── */
+    .mt-4  { margin-top: 4px; }
+    .mt-8  { margin-top: 8px; }
+    .mt-16 { margin-top: 16px; }
+    .mt-24 { margin-top: 24px; }
+
+    /* ── Responsive ───────────────────────────────────────────── */
+    @media (max-width: 480px) {
+      .card-body { padding: 18px; }
+      .carrier-row { flex-direction: column; }
+      .spread-toggle { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <div class="blob blob-1"></div>
+  <div class="blob blob-2"></div>
+
+  <div class="page">
+    <header>
+      <div class="logo-row">
+        <span class="logo-icon">🔮</span>
+        <h1>Hide a message in <span>plain sight</span></h1>
+      </div>
+      <p class="subtitle">Unicode steganography · Variation selectors · Invisible ink</p>
+    </header>
+
+    <div class="card">
+      <div class="tabs">
+        <button class="tab active" id="tab-encode" onclick="switchMode('encode')">⬡ Encode</button>
+        <button class="tab" id="tab-decode" onclick="switchMode('decode')">⬡ Decode</button>
+      </div>
+
+      <!-- ═══════════════════════════════════════ ENCODE PANEL -->
+      <div class="card-body" id="panel-encode">
+        <div class="section-label">Secret message</div>
+        <textarea id="enc-message" placeholder="Type the message you want to hide…" rows="3"
+                  oninput="onEncodeInput()"></textarea>
+
+        <div class="divider"></div>
+
+        <div class="section-label">Carrier</div>
+        <div class="carrier-row">
+          <div class="carrier-input-wrap">
+            <input class="carrier-input" id="enc-carrier" type="text"
+                   placeholder="😀  or any text, e.g. "I like food""
+                   value="😀" oninput="onEncodeInput()" />
+          </div>
+          <label class="spread-toggle">
+            <input type="checkbox" id="enc-spread" onchange="onEncodeInput()" />
+            <div class="toggle-track"><div class="toggle-thumb"></div></div>
+            <span class="toggle-label">Spread</span>
+          </label>
+        </div>
+
+        <div class="picker-section">
+          <div class="picker-tabs">
+            <button class="picker-tab active" onclick="showPicker('emoji', this)">Emoji</button>
+            <button class="picker-tab" onclick="showPicker('lower', this)">a–z</button>
+            <button class="picker-tab" onclick="showPicker('upper', this)">A–Z</button>
+            <button class="picker-tab" onclick="showPicker('digit', this)">0–9</button>
+          </div>
+          <div class="picker-grid" id="picker-grid"></div>
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="section-label">Encoded output</div>
+        <div class="output-wrapper">
+          <div class="output-area" id="enc-output" style="min-height:60px;">
+            <span style="color:var(--text-dim);font-family:'Syne',sans-serif;font-size:0.85rem;">
+              Encoded text will appear here…
+            </span>
+          </div>
+          <button class="copy-btn" id="enc-copy-btn" onclick="copyOutput('enc-output', 'enc-copy-btn')">Copy</button>
+        </div>
+        <div class="stat-bar" id="enc-stats"></div>
+        <div class="error-msg" id="enc-error"></div>
+      </div>
+
+      <!-- ═══════════════════════════════════════ DECODE PANEL -->
+      <div class="card-body" id="panel-decode" style="display:none;">
+        <div class="section-label">Paste encoded text</div>
+        <textarea id="dec-input" placeholder="Paste text that may contain a hidden message…"
+                  rows="4" oninput="onDecodeInput()"></textarea>
+
+        <div class="divider"></div>
+
+        <div class="section-label">Decoded message</div>
+        <div class="output-wrapper">
+          <div class="output-area" id="dec-output" style="min-height:60px;">
+            <span style="color:var(--text-dim);font-family:'Syne',sans-serif;font-size:0.85rem;">
+              Decoded message will appear here…
+            </span>
+          </div>
+          <button class="copy-btn" id="dec-copy-btn" onclick="copyOutput('dec-output', 'dec-copy-btn')">Copy</button>
+        </div>
+        <div class="stat-bar" id="dec-stats"></div>
+        <div class="error-msg" id="dec-error"></div>
+      </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════ HOW IT WORKS -->
+    <div class="how-it-works">
+      <div class="how-title">How it works</div>
+      <div class="how-grid">
+        <div class="how-card">
+          <div class="how-card-icon">👁️</div>
+          <div class="how-card-title">Invisible Ink</div>
+          <div class="how-card-desc">Uses Unicode Variation Selectors (U+FE00–U+FE0F and U+E0100–U+E01EF) — invisible characters that carry byte values 0–255.</div>
+        </div>
+        <div class="how-card">
+          <div class="how-card-icon">🔐</div>
+          <div class="how-card-title">Any Carrier</div>
+          <div class="how-card-desc">Any emoji, letter, word, or phrase can be the host. The visible text is unchanged — only invisible data is appended.</div>
+        </div>
+        <div class="how-card">
+          <div class="how-card-icon">🌊</div>
+          <div class="how-card-title">Spread Mode</div>
+          <div class="how-card-desc">Distributes hidden bytes evenly across every character of a phrase, so no single character accumulates a suspicious data block.</div>
+        </div>
+      </div>
+    </div>
+
+    <footer>
+      <a href="https://github.com/paulgb/emoji-encoder" target="_blank" rel="noopener noreferrer">
+        Original concept by paulgb · Python port &amp; web UI by Isaiah
+      </a>
+    </footer>
+  </div>
+
+  <script>
+  // ══════════════════════════════════════════════════════════════
+  //  ENCODING LOGIC  (mirrors encoding.py exactly)
+  // ══════════════════════════════════════════════════════════════
+
+  const VS_START      = 0xFE00;
+  const VS_END        = 0xFE0F;
+  const VS_SUPP_START = 0xE0100;
+  const VS_SUPP_END   = 0xE01EF;
+
+  function toVariationSelector(byte) {
+    if (byte >= 0 && byte <= 15)
+      return String.fromCodePoint(VS_START + byte);
+    if (byte >= 16 && byte <= 255)
+      return String.fromCodePoint(VS_SUPP_START + byte - 16);
+    throw new Error(`Byte value must be 0–255, got ${byte}`);
+  }
+
+  function fromVariationSelector(cp) {
+    if (cp >= VS_START && cp <= VS_END)        return cp - VS_START;
+    if (cp >= VS_SUPP_START && cp <= VS_SUPP_END) return cp - VS_SUPP_START + 16;
+    return null;
+  }
+
+  /** Strip any variation selectors already in the carrier. */
+  function stripVS(text) {
+    return [...text].filter(c => fromVariationSelector(c.codePointAt(0)) === null).join('');
+  }
+
+  function encode(carrier, text) {
+    const clean = stripVS(carrier);
+    if (!clean) throw new Error('Carrier has no visible characters after stripping variation selectors.');
+    const bytes = new TextEncoder().encode(text);
+    let result = clean;
+    for (const b of bytes) result += toVariationSelector(b);
+    return result;
+  }
+
+  function encodeSpread(carrier, text) {
+    const clean = stripVS(carrier);
+    if (!clean) throw new Error('Carrier has no visible characters after stripping variation selectors.');
+    const chars = [...clean];
+    const bytes = Array.from(new TextEncoder().encode(text));
+    const n = chars.length;
+    const total = bytes.length;
+    const chunkSize = total > 0 ? Math.ceil(total / n) : 0;
+    let result = '';
+    for (let i = 0; i < chars.length; i++) {
+      result += chars[i];
+      if (chunkSize > 0) {
+        const start = i * chunkSize;
+        const end   = Math.min(start + chunkSize, total);
+        for (let j = start; j < end; j++) result += toVariationSelector(bytes[j]);
+      }
+    }
+    return result;
+  }
+
+  function decode(text) {
+    const bytes = [];
+    for (const ch of text) {
+      const b = fromVariationSelector(ch.codePointAt(0));
+      if (b !== null) bytes.push(b);
+    }
+    if (bytes.length === 0) return '';
+    return new TextDecoder().decode(new Uint8Array(bytes));
+  }
+
+  function countHiddenBytes(text) {
+    return [...text].filter(c => fromVariationSelector(c.codePointAt(0)) !== null).length;
+  }
+
+  function visibleLength(text) {
+    return [...text].filter(c => fromVariationSelector(c.codePointAt(0)) === null).length;
+  }
+
+
+  // ══════════════════════════════════════════════════════════════
+  //  PICKER DATA
+  // ══════════════════════════════════════════════════════════════
+
+  const PICKERS = {
+    emoji: [
+      '😀','😂','🥰','😎','🤔','😅','😏','🥹','😤','🤯',
+      '👍','👎','👏','🤝','🙌','🫶','🎉','🎂','🔥','💯',
+      '🚀','👀','💀','🎯','🏆','💎','🍕','🍔','🌮','🍜',
+      '🍣','🍩','🍺','☕','🌈','🌞','🌙','⭐','🌊','🍀',
+      '🌸','🐶','🐱','🦊','🐼','🦁','🐧','🦋','🐢','🔮',
+      '💡','🎸','📱','📦','🗡️','🕵️','🌀','🔑','💌','🛸',
+    ],
+    lower: [...'abcdefghijklmnopqrstuvwxyz'],
+    upper: [...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'],
+    digit: [...'0123456789'],
+  };
+
+  let currentPickerKey = 'emoji';
+
+  function showPicker(key, btn) {
+    currentPickerKey = key;
+    document.querySelectorAll('.picker-tab').forEach(t => t.classList.remove('active'));
+    btn.classList.add('active');
+    renderPicker();
+  }
+
+  function renderPicker() {
+    const grid    = document.getElementById('picker-grid');
+    const carrier = document.getElementById('enc-carrier').value;
+    grid.innerHTML = '';
+    const items = PICKERS[currentPickerKey];
+    items.forEach(item => {
+      const btn = document.createElement('button');
+      btn.className = 'picker-item' + (item === carrier ? ' selected' : '');
+      btn.textContent = item;
+      btn.title = `Use "${item}" as carrier`;
+      btn.onclick = () => {
+        document.getElementById('enc-carrier').value = item;
+        renderPicker();
+        onEncodeInput();
+      };
+      grid.appendChild(btn);
+    });
+  }
+
+
+  // ══════════════════════════════════════════════════════════════
+  //  UI LOGIC
+  // ══════════════════════════════════════════════════════════════
+
+  function switchMode(mode) {
+    document.getElementById('panel-encode').style.display = mode === 'encode' ? '' : 'none';
+    document.getElementById('panel-decode').style.display = mode === 'decode' ? '' : 'none';
+    document.getElementById('tab-encode').classList.toggle('active', mode === 'encode');
+    document.getElementById('tab-decode').classList.toggle('active', mode === 'decode');
+  }
+
+  function showError(id, msg) {
+    const el = document.getElementById(id);
+    el.textContent = msg;
+    el.style.display = msg ? 'block' : 'none';
+  }
+
+  function setOutput(id, text, isEmpty) {
+    const el = document.getElementById(id);
+    if (isEmpty) {
+      el.innerHTML = `<span style="color:var(--text-dim);font-family:'Syne',sans-serif;font-size:0.85rem;">${text}</span>`;
+    } else {
+      el.textContent = text;
+    }
+  }
+
+  function setStats(id, parts) {
+    const el = document.getElementById(id);
+    el.innerHTML = parts.map(([label, val]) =>
+      `<span class="stat">${label}: <strong>${val}</strong></span>`
+    ).join('');
+  }
+
+  function onEncodeInput() {
+    const message = document.getElementById('enc-message').value;
+    const carrier = document.getElementById('enc-carrier').value;
+    const spread  = document.getElementById('enc-spread').checked;
+
+    renderPicker();
+    showError('enc-error', '');
+
+    if (!carrier.trim()) {
+      setOutput('enc-output', 'Encoded text will appear here…', true);
+      setStats('enc-stats', []);
+      document.getElementById('enc-copy-btn').classList.remove('visible');
+      return;
+    }
+
+    try {
+      const result = spread ? encodeSpread(carrier, message) : encode(carrier, message);
+      setOutput('enc-output', result, false);
+
+      const hidden  = countHiddenBytes(result);
+      const visible = visibleLength(result);
+      setStats('enc-stats', [
+        ['visible', visible],
+        ['hidden bytes', hidden],
+        ['mode', spread ? 'spread' : 'single'],
+      ]);
+      document.getElementById('enc-copy-btn').classList.add('visible');
+    } catch (e) {
+      setOutput('enc-output', 'Encoded text will appear here…', true);
+      showError('enc-error', '⚠ ' + e.message);
+      setStats('enc-stats', []);
+      document.getElementById('enc-copy-btn').classList.remove('visible');
+    }
+  }
+
+  function onDecodeInput() {
+    const text = document.getElementById('dec-input').value;
+    showError('dec-error', '');
+
+    if (!text.trim()) {
+      setOutput('dec-output', 'Decoded message will appear here…', true);
+      setStats('dec-stats', []);
+      document.getElementById('dec-copy-btn').classList.remove('visible');
+      return;
+    }
+
+    try {
+      const result  = decode(text);
+      const hidden  = countHiddenBytes(text);
+
+      if (result) {
+        setOutput('dec-output', result, false);
+        setStats('dec-stats', [
+          ['hidden bytes found', hidden],
+          ['message length', result.length],
+          ['UTF-8 bytes', new TextEncoder().encode(result).length],
+        ]);
+        document.getElementById('dec-copy-btn').classList.add('visible');
+      } else {
+        setOutput('dec-output', 'No hidden data found in this text.', true);
+        setStats('dec-stats', []);
+        document.getElementById('dec-copy-btn').classList.remove('visible');
+      }
+    } catch (e) {
+      setOutput('dec-output', 'Decoded message will appear here…', true);
+      showError('dec-error', '⚠ ' + e.message);
+      setStats('dec-stats', []);
+      document.getElementById('dec-copy-btn').classList.remove('visible');
+    }
+  }
+
+  async function copyOutput(outputId, btnId) {
+    const el  = document.getElementById(outputId);
+    const btn = document.getElementById(btnId);
+    const text = el.textContent;
+    try {
+      await navigator.clipboard.writeText(text);
+      btn.textContent = 'Copied!';
+      btn.classList.add('copied');
+      setTimeout(() => {
+        btn.textContent = 'Copy';
+        btn.classList.remove('copied');
+      }, 2000);
+    } catch {
+      btn.textContent = 'Failed';
+      setTimeout(() => { btn.textContent = 'Copy'; }, 2000);
+    }
+  }
+
+  // ── Init ───────────────────────────────────────────────────────
+  renderPicker();
+  onEncodeInput();
+  </script>
+</body>
+</html>
