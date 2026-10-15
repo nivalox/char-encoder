@@ -1,73 +1,75 @@
 """
-encoding.py — Core steganography logic for the emoji encoder.
+encoding.py — Core steganography + cryptography logic for the emoji encoder.
 
-How it works
-------------
-Unicode defines two blocks of "Variation Selector" code points whose
-sole purpose is to modify the rendering of the preceding character.
-Crucially, they are *invisible* in virtually every renderer:
+Encryption modes (stored as a 1-byte magic prefix in the hidden payload):
+  0x00  PLAIN       — no encryption, raw UTF-8
+  0x01  GCM         — AES-256-GCM   (authenticated; recommended)
+  0x02  CBC         — AES-256-CBC   (PKCS7 padding)
+  0x03  CTR         — AES-256-CTR   (stream cipher mode)
+  0x04  BASE64_GCM  — Base64-encode first, then AES-256-GCM
 
-  VS1–VS16   U+FE00–U+FE0F    → stores byte values 0–15
-  VS17–VS256 U+E0100–U+E01EF  → stores byte values 16–255
+All AES modes derive a 256-bit key from the password via SHA-256.
+IVs / counters are prepended to the ciphertext and are randomly generated.
 
-Together they cover every possible byte value (0–255), so any UTF-8
-encoded string can be losslessly hidden inside another string.
-
-Two encoding modes
-------------------
-encode(carrier, text)
-    All hidden bytes are appended to a single carrier string.
-    "😀" → "😀<invisible bytes>"
-
-encode_spread(carrier, text)
-    The hidden bytes are distributed evenly across every character in
-    the carrier string, so no single character accumulates a suspicious
-    clump of invisible data.
-    "I like food" → "I<part1> <part2>l<part3>i<part4>k<part5>..."
-
-Both modes are decoded by the same decode() function, which simply
-collects every variation selector it finds in the string, in order.
+Requirements:
+    pip install cryptography
 """
 
 from __future__ import annotations
-import math
+
+import base64
+import hashlib
+import os
+import struct
+from enum import IntEnum
 from typing import Optional
+
+try:
+    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+    from cryptography.hazmat.primitives import padding as sym_padding
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    _HAS_CRYPTO = True
+except ImportError:
+    _HAS_CRYPTO = False
+
 
 # ── Variation Selector ranges ─────────────────────────────────────────────────
 
-# VS1–VS16  (U+FE00–U+FE0F) : byte values 0x00–0x0F (0–15)
-_VS_START = 0xFE00
-_VS_END   = 0xFE0F
-
-# VS17–VS256 (U+E0100–U+E01EF) : byte values 0x10–0xFF (16–255)
+_VS_START      = 0xFE00
+_VS_END        = 0xFE0F
 _VS_SUPP_START = 0xE0100
 _VS_SUPP_END   = 0xE01EF
 
 
-# ── Low-level helpers ─────────────────────────────────────────────────────────
+# ── Magic byte enum ───────────────────────────────────────────────────────────
+
+class EncMode(IntEnum):
+    PLAIN      = 0x00
+    GCM        = 0x01
+    CBC        = 0x02
+    CTR        = 0x03
+    BASE64_GCM = 0x04
+
+MODE_NAMES = {
+    EncMode.PLAIN:      "Plain (no encryption)",
+    EncMode.GCM:        "AES-256-GCM",
+    EncMode.CBC:        "AES-256-CBC",
+    EncMode.CTR:        "AES-256-CTR",
+    EncMode.BASE64_GCM: "Base64 + AES-256-GCM",
+}
+
+
+# ── Low-level VS helpers ──────────────────────────────────────────────────────
 
 def to_variation_selector(byte: int) -> str:
-    """
-    Convert a single byte value (0–255) to its variation selector character.
-
-    Raises ValueError for out-of-range input so callers get an explicit
-    error instead of silently corrupting data (bug fix: original returned
-    null for the unreachable else-branch, which TypeScript would silently
-    stringify as the literal text "null").
-    """
     if 0 <= byte <= 15:
         return chr(_VS_START + byte)
-    elif 16 <= byte <= 255:
+    if 16 <= byte <= 255:
         return chr(_VS_SUPP_START + byte - 16)
-    else:
-        raise ValueError(f"Byte value must be 0–255, got {byte!r}")
+    raise ValueError(f"Byte value must be 0–255, got {byte!r}")
 
 
 def from_variation_selector(code_point: int) -> Optional[int]:
-    """
-    Convert a Unicode code point back to its byte value (0–255).
-    Returns None if the code point is not a variation selector.
-    """
     if _VS_START <= code_point <= _VS_END:
         return code_point - _VS_START
     if _VS_SUPP_START <= code_point <= _VS_SUPP_END:
@@ -75,159 +77,295 @@ def from_variation_selector(code_point: int) -> Optional[int]:
     return None
 
 
-# ── Public API ────────────────────────────────────────────────────────────────
-
 def _strip_vs(text: str) -> str:
-    """
-    Remove all variation selector characters from *text*.
-
-    This is applied to the carrier before encoding so that VS chars that
-    are part of the emoji's own composition (e.g. U+FE0F in ✌️, ❄️, 🖥️)
-    are not mistaken for hidden data during decoding.
-    """
     return "".join(c for c in text if from_variation_selector(ord(c)) is None)
 
 
-def encode(carrier: str, text: str) -> str:
+def _extract_bytes(text: str) -> bytes:
+    return bytes(
+        b for c in text
+        if (b := from_variation_selector(ord(c))) is not None
+    )
+
+
+# ── AES key derivation ────────────────────────────────────────────────────────
+
+def _derive_key(password: str) -> bytes:
+    """Derive a 256-bit AES key from a password using SHA-256."""
+    return hashlib.sha256(password.encode("utf-8")).digest()
+
+
+# ── AES helpers (require `cryptography`) ─────────────────────────────────────
+
+def _require_crypto() -> None:
+    if not _HAS_CRYPTO:
+        raise RuntimeError(
+            "The 'cryptography' package is required for AES encryption.\n"
+            "Install it with:  pip install cryptography"
+        )
+
+
+def _aes_gcm_encrypt(data: bytes, key: bytes) -> bytes:
+    """AES-256-GCM: returns 12-byte IV + ciphertext+tag."""
+    iv = os.urandom(12)
+    aesgcm = AESGCM(key)
+    ct = aesgcm.encrypt(iv, data, None)
+    return iv + ct
+
+
+def _aes_gcm_decrypt(payload: bytes, key: bytes) -> bytes:
+    if len(payload) < 12:
+        raise ValueError("Payload too short for AES-GCM.")
+    iv, ct = payload[:12], payload[12:]
+    aesgcm = AESGCM(key)
+    try:
+        return aesgcm.decrypt(iv, ct, None)
+    except Exception:
+        raise ValueError("AES-GCM decryption failed: wrong key or corrupted data.")
+
+
+def _aes_cbc_encrypt(data: bytes, key: bytes) -> bytes:
+    """AES-256-CBC: PKCS7 padded, 16-byte IV prepended."""
+    iv = os.urandom(16)
+    padder = sym_padding.PKCS7(128).padder()
+    padded = padder.update(data) + padder.finalize()
+    cipher = Cipher(algorithms.AES(key), modes.CBC(iv))
+    enc = cipher.encryptor()
+    ct = enc.update(padded) + enc.finalize()
+    return iv + ct
+
+
+def _aes_cbc_decrypt(payload: bytes, key: bytes) -> bytes:
+    if len(payload) < 16:
+        raise ValueError("Payload too short for AES-CBC.")
+    iv, ct = payload[:16], payload[16:]
+    cipher = Cipher(algorithms.AES(key), modes.CBC(iv))
+    dec = cipher.decryptor()
+    try:
+        padded = dec.update(ct) + dec.finalize()
+        unpadder = sym_padding.PKCS7(128).unpadder()
+        return unpadder.update(padded) + unpadder.finalize()
+    except Exception:
+        raise ValueError("AES-CBC decryption failed: wrong key or corrupted data.")
+
+
+def _aes_ctr_encrypt(data: bytes, key: bytes) -> bytes:
+    """AES-256-CTR: 16-byte nonce prepended."""
+    nonce = os.urandom(16)
+    cipher = Cipher(algorithms.AES(key), modes.CTR(nonce))
+    enc = cipher.encryptor()
+    ct = enc.update(data) + enc.finalize()
+    return nonce + ct
+
+
+def _aes_ctr_decrypt(payload: bytes, key: bytes) -> bytes:
+    if len(payload) < 16:
+        raise ValueError("Payload too short for AES-CTR.")
+    nonce, ct = payload[:16], payload[16:]
+    cipher = Cipher(algorithms.AES(key), modes.CTR(nonce))
+    dec = cipher.decryptor()
+    try:
+        return dec.update(ct) + dec.finalize()
+    except Exception:
+        raise ValueError("AES-CTR decryption failed: wrong key or corrupted data.")
+
+
+# ── Encryption / decryption (high-level) ─────────────────────────────────────
+
+def encrypt(data: bytes, password: str, mode: EncMode = EncMode.GCM) -> bytes:
     """
-    Encode *text* invisibly by appending all of its UTF-8 bytes (as
-    variation selectors) directly after *carrier*.
+    Encrypt *data* and prepend the magic byte. Returns bytes ready for embedding.
+    """
+    _require_crypto()
+    key = _derive_key(password)
 
-    *carrier* may be any non-empty string — one emoji, one letter, a
-    word, a sentence.  All hidden bytes land after the last character
-    of *carrier*, so the result looks identical to *carrier* when rendered.
+    if mode == EncMode.GCM:
+        ct = _aes_gcm_encrypt(data, key)
+    elif mode == EncMode.CBC:
+        ct = _aes_cbc_encrypt(data, key)
+    elif mode == EncMode.CTR:
+        ct = _aes_ctr_encrypt(data, key)
+    elif mode == EncMode.BASE64_GCM:
+        b64 = base64.b64encode(data)
+        ct = _aes_gcm_encrypt(b64, key)
+    else:
+        raise ValueError(f"Unknown encryption mode: {mode!r}")
 
-    Note: Any variation selectors already present in the carrier (e.g.
-    U+FE0F in emojis like ✌️ or ❄️) are stripped before encoding.
-    Without this, the decoder would mistake the carrier's own VS chars
-    for hidden data and prepend garbage bytes to the decoded output.
+    return bytes([mode.value]) + ct
 
-    Args:
-        carrier: The visible host string (must be non-empty).
-        text:    The secret message to hide.
 
-    Returns:
-        A string visually identical to *carrier* with the message embedded.
+def decrypt(payload: bytes, password: str, force_mode: Optional[EncMode] = None) -> tuple[bytes, EncMode]:
+    """
+    Decrypt *payload*. Reads the magic prefix to detect the mode unless
+    *force_mode* is given.  Returns (plaintext_bytes, detected_mode).
+    """
+    _require_crypto()
+    if not payload:
+        raise ValueError("Empty payload.")
 
-    Raises:
-        ValueError: If *carrier* is empty or contains only variation selectors.
+    magic = payload[0]
+    if force_mode is not None:
+        mode = force_mode
+        body = payload  # caller wants us to treat all bytes as body
+    else:
+        try:
+            mode = EncMode(magic)
+        except ValueError:
+            raise ValueError(
+                f"Unknown magic byte 0x{magic:02x}. "
+                "The data may have been encoded without a key, or is corrupt."
+            )
+        body = payload[1:]
+
+    key = _derive_key(password)
+
+    if mode == EncMode.PLAIN:
+        return body, mode
+    if mode == EncMode.GCM:
+        return _aes_gcm_decrypt(body, key), mode
+    if mode == EncMode.CBC:
+        return _aes_cbc_decrypt(body, key), mode
+    if mode == EncMode.CTR:
+        return _aes_ctr_decrypt(body, key), mode
+    if mode == EncMode.BASE64_GCM:
+        b64_bytes = _aes_gcm_decrypt(body, key)
+        return base64.b64decode(b64_bytes), mode
+
+    raise ValueError(f"Unhandled mode: {mode!r}")
+
+
+# ── Public steganography API ──────────────────────────────────────────────────
+
+def encode(
+    carrier: str,
+    text: str,
+    key: Optional[str] = None,
+    mode: EncMode = EncMode.GCM,
+) -> str:
+    """
+    Encode *text* invisibly after *carrier* using Variation Selectors.
+
+    If *key* is provided, the message is AES-encrypted using *mode* before
+    embedding. A 1-byte magic prefix is always prepended so the decoder can
+    auto-detect the encryption type (or detect plain text).
     """
     clean = _strip_vs(carrier)
     if not clean:
         raise ValueError(
             "Carrier is empty after stripping variation selectors. "
-            "Use a carrier that contains at least one visible character."
+            "Provide a carrier with at least one visible character."
         )
+
+    data = text.encode("utf-8")
+
+    if key:
+        payload = encrypt(data, key, mode)
+    else:
+        # Plain: prepend 0x00 magic so decoder knows it's unencrypted
+        payload = bytes([EncMode.PLAIN]) + data
+
     result = clean
-    for byte in text.encode("utf-8"):
+    for byte in payload:
         result += to_variation_selector(byte)
     return result
 
 
-def encode_spread(carrier: str, text: str) -> str:
+def encode_spread(
+    carrier: str,
+    text: str,
+    key: Optional[str] = None,
+    mode: EncMode = EncMode.GCM,
+) -> str:
     """
-    Spread-encode *text* by distributing its UTF-8 bytes evenly across
-    every character of *carrier*.
-
-    For example, encoding "Hello" into "I like food" splits the 5 bytes
-    of "Hello" across the 11 characters of the phrase.  Each character
-    picks up roughly half a byte on average, making the distribution much
-    less obvious than dumping everything after one character.
-
-    The bytes are split into sequential chunks (not round-robin), so a
-    simple left-to-right scan of variation selectors reassembles them
-    in the correct order — no metadata needed to decode.
-
-    Args:
-        carrier: The visible host string (must be non-empty).
-        text:    The secret message to hide.
-
-    Returns:
-        A string visually identical to *carrier* with the message spread
-        across all characters.
-
-    Raises:
-        ValueError: If *carrier* is empty.
+    Like *encode*, but distributes the hidden bytes evenly across every
+    character of *carrier* for reduced detectability.
     """
     clean = _strip_vs(carrier)
     if not clean:
         raise ValueError(
             "Carrier is empty after stripping variation selectors. "
-            "Use a carrier that contains at least one visible character."
+            "Provide a carrier with at least one visible character."
         )
 
-    carrier_chars = list(clean)            # split on Unicode code points
-    message_bytes = list(text.encode("utf-8"))
-    n     = len(carrier_chars)
-    total = len(message_bytes)
+    data = text.encode("utf-8")
+    if key:
+        payload = encrypt(data, key, mode)
+    else:
+        payload = bytes([EncMode.PLAIN]) + data
 
-    chunk_size = math.ceil(total / n) if total > 0 else 0
-
+    chars = list(clean)
     result = ""
-    for i, char in enumerate(carrier_chars):
-        result += char
-        if chunk_size > 0:
-            start = i * chunk_size
-            end   = min(start + chunk_size, total)
-            for byte in message_bytes[start:end]:
-                result += to_variation_selector(byte)
-
+    for i, ch in enumerate(chars):
+        result += ch
+        for j in range(i, len(payload), len(chars)):
+            result += to_variation_selector(payload[j])
     return result
 
 
-def decode(text: str) -> str:
+def decode(text: str, key: Optional[str] = None, force_mode: Optional[EncMode] = None) -> str:
     """
-    Decode any variation selectors found anywhere in *text*, in order.
+    Decode any hidden data from *text*.
 
-    This is compatible with both encode() and encode_spread() output.
-    Visible carrier characters are simply skipped; only variation
-    selectors contribute to the decoded message.
+    Auto-detects encryption mode from the embedded magic byte.
+    If *key* is provided, decrypts using that key.
+    If *force_mode* is provided, overrides auto-detection.
 
-    Bug fix: the original TypeScript decode() broke out of the loop on
-    the first non-VS character seen *after* any VS character, making it
-    impossible to decode spread-encoded (multi-carrier) text.  This
-    implementation collects all VS characters from the entire string.
-
-    Args:
-        text: A string that may contain hidden variation selectors.
-
-    Returns:
-        The decoded secret message, or '' if no hidden data is found.
-
-    Raises:
-        ValueError: If the collected bytes are not valid UTF-8.
+    Returns the decoded message, or '' if no hidden data is present.
     """
-    decoded_bytes: list[int] = []
-
-    for char in text:                          # iterates by Unicode code point
-        byte = from_variation_selector(ord(char))
-        if byte is not None:
-            decoded_bytes.append(byte)
-
-    if not decoded_bytes:
+    raw = _extract_bytes(text)
+    if not raw:
         return ""
 
+    if not key:
+        # No key given
+        magic = raw[0]
+        if magic == EncMode.PLAIN:
+            try:
+                return raw[1:].decode("utf-8")
+            except UnicodeDecodeError as exc:
+                raise ValueError(f"Hidden bytes are not valid UTF-8: {exc}") from exc
+        else:
+            # Encrypted content without a key → return raw bytes decoded as UTF-8
+            # (will look like garbage, by design)
+            try:
+                return raw.decode("utf-8", errors="replace")
+            except Exception:
+                return raw.decode("latin-1")
+
+    plaintext_bytes, detected_mode = decrypt(raw, key, force_mode)
+
     try:
-        return bytes(decoded_bytes).decode("utf-8")
+        return plaintext_bytes.decode("utf-8")
     except UnicodeDecodeError as exc:
         raise ValueError(
-            f"Hidden bytes are not valid UTF-8 — the text may not be encoded "
-            f"with this tool, or may have been corrupted.\nDetail: {exc}"
+            f"Decoded bytes are not valid UTF-8. Wrong key? Detail: {exc}"
         ) from exc
+
+
+def detect_mode(text: str) -> Optional[EncMode]:
+    """
+    Return the encryption mode stored in *text*'s hidden data, or None if no
+    hidden data is present.
+    """
+    raw = _extract_bytes(text)
+    if not raw:
+        return None
+    try:
+        return EncMode(raw[0])
+    except ValueError:
+        return None
 
 
 # ── Utility helpers ───────────────────────────────────────────────────────────
 
 def has_hidden_data(text: str) -> bool:
-    """Return True if *text* contains at least one variation selector."""
     return any(from_variation_selector(ord(c)) is not None for c in text)
 
 
 def count_hidden_bytes(text: str) -> int:
-    """Return the number of hidden bytes embedded in *text*."""
     return sum(1 for c in text if from_variation_selector(ord(c)) is not None)
 
 
 def visible_length(text: str) -> int:
-    """Return the number of visible (non-VS) characters in *text*."""
     return sum(1 for c in text if from_variation_selector(ord(c)) is None)
+  
